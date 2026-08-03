@@ -120,6 +120,7 @@ defmodule ReterminalDmCm4.MixProject do
       "fwup.conf.eex",
       "fwup.conf",
       "LICENSE",
+      "linux",
       "linux-6.18.defconfig",
       "mix.exs",
       "nerves_defconfig",

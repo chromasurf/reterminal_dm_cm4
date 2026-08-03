@@ -23,9 +23,15 @@ defmodule Monitor.OS.KioskDrm do
       3 → "0 -1 1 1 0 0".
     * udev must have enumerated input devices (see `setup_udev` in
       `kiosk.ex`) — Cog's DRM platform reads touch input via libinput.
-    * The Goodix GT9271 scans at a fixed ~43 Hz — the touch report rate
-      is a hardware limit (a faster rate requested via the chip config
-      register has no effect; the INT line itself fires at ~45 Hz).
+    * Touch report rate is ~96 Hz (median interval 10.3 ms, measured at
+      /dev/input via SYN_REPORT timestamps). The ~43 Hz previously noted
+      here as a "hardware limit" was the factory GT9271 sensor config:
+      its scan took 23.3 ms regardless of the 0x8056 refresh register.
+      Fixed by the retuned config shipped in
+      rootfs_overlay/lib/firmware/goodix_9271_cfg.bin (BitFreq 6600 Hz,
+      drive factors 27/25, TI-style gain/threshold compensation),
+      plus dtparam=i2c_vc_baudrate=400000 in config.txt and the
+      spurious-interrupt patch under linux/.
 
   Quick start without a supervisor (IEx):
 
