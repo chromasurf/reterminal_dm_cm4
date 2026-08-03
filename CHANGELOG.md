@@ -12,6 +12,42 @@ follows:
    releases, and Linux kernel updates. They're also made to fix bugs and add
    features to the build infrastructure.
 
+## v1.2.3
+
+Touch input fixes for the reTerminal DM (GT9271): report rate goes from
+~43 Hz to ~96 Hz (median report interval 23.3 ms → 10.3 ms, measured via
+evdev SYN_REPORT timestamps while swiping).
+
+* Changes
+  * Ship `rootfs_overlay/lib/firmware/goodix_9271_cfg.bin` — a retuned
+    GT9271 sensor config. The factory config scans at ~43 Hz regardless
+    of the Refresh_Rate register (the scan itself took 23.3 ms). The new
+    config raises Panel_BitFreq 2003 → 6600 Hz with drive-frequency
+    factors reduced 88/90 → 27/25, keeping the drive frequencies in the
+    panel-proven band (~170 kHz, ~400 kHz was measured to cause
+    dropouts). The shorter integration (27 vs 88 carrier cycles) is
+    compensated like TI's reference GT9271 config for the same panel
+    class (DRA71x): Panel_Dump_Shift 3 → 4 (2× gain), touch/leave
+    levels 100/70 → 80/50. Frequency-hopping window and segment factors
+    are rescaled so their absolute frequencies stay unchanged. The
+    factory config is kept next to it as `goodix_9271_cfg.factory.bin`
+    for rollback (copy it over `goodix_9271_cfg.bin` in `/data/firmware`
+    with the firmware search path pointed there, then rebind the
+    driver — the controller persists whatever config it last received).
+  * Kernel patch `linux/goodix_spurious_irq_fix.patch`: the mainline goodix
+    driver no longer burns its 20 ms buffer-status timeout on the spurious
+    interrupts the panel sends after finger-up. Those stalls halved the
+    effective touch report rate (~43 Hz observed with the chip configured
+    for 100 Hz).
+  * `config.txt`: raise the touch bus (i2c_vc, behind the CSI/DSI mux) from
+    the 100 kHz firmware default to the GT9271 datasheet maximum via
+    `dtparam=i2c_vc_baudrate=400000`.
+  * `config.txt`: drop the dead `tp_rotate=1` overlay parameter — the
+    reTerminal-DM overlay has no `__overrides__`; touch axes come from the
+    device tree / libinput calibration matrix.
+  * `mix.exs`: include the `linux/` kernel patch directory in the artifact
+    checksum so patch changes invalidate cached artifacts.
+
 ## v1.2.2
 
 Build tooling — no functional changes to the image.

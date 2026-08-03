@@ -1,0 +1,71 @@
+input: goodix: don't wait out the buffer-status timeout while idle
+
+The GT9271 on the reTerminal DM scans at 100 Hz (its config sets a
+10 ms coordinate refresh period), yet the delivered report rate maxes
+out at ~43-45 Hz.
+
+After a 'finger up' event the panel sends a few spurious interrupts in
+which the buffer status bit never gets set (see the comment introduced
+by upstream commit 9b5db7aab4d6). Each of those keeps the threaded IRQ
+handler inside the GOODIX_BUFFER_STATUS_TIMEOUT poll loop for the full
+20 ms. Interrupts arriving during that window collapse into a single
+rerun of the thread (IRQTF_RUNTHREAD is a single bit), so real scan
+cycles are skipped and the effective report period roughly doubles.
+
+Bail out of the poll loop early when no contacts are active. Nothing
+can be lost in that state: while a finger is on the panel the
+controller keeps scanning, so the next interrupt arrives within one
+scan period, and the buffer status bit latches until the host clears
+0x814E - a 'finger down' whose status bit lags its interrupt is picked
+up by the following interrupt. 'Finger up' always happens while
+contacts are active and therefore still gets the full 20 ms timeout,
+preserving the correctness fix from commit 9b5db7aab4d6.
+
+This is the IRQ-path counterpart of the polling-path fix in
+raspberrypi/linux commit 42bcead3ece6 ("input: goodix: Don't retry
+individual reads when polling").
+
+--- a/drivers/input/touchscreen/goodix.h	2026-08-02 15:56:15
++++ b/drivers/input/touchscreen/goodix.h	2026-08-02 15:56:20
+@@ -93,6 +93,7 @@
+ 	u16 version;
+ 	bool reset_controller_at_probe;
+ 	bool load_cfg_from_disk;
++	bool contacts_active;
+ 	int pen_input_registered;
+ 	struct completion firmware_loading_complete;
+ 	unsigned long irq_flags;
+--- a/drivers/input/touchscreen/goodix.c	2026-08-02 15:56:15
++++ b/drivers/input/touchscreen/goodix.c	2026-08-02 15:56:29
+@@ -305,6 +305,21 @@
+ 			 * versions continuously report "not ready" if there are
+ 			 * no touch points.
+ 			 */
++			break;
++
++		/*
++		 * After 'finger up' the panel sends a few spurious interrupts
++		 * with the buffer status bit never set; waiting out the full
++		 * timeout on each of those stalls the IRQ thread for 20 ms
++		 * and roughly halves the effective report rate. Nothing is
++		 * lost by bailing out while no contacts are active: the
++		 * controller keeps scanning while a finger is on the panel
++		 * (the next interrupt arrives within one scan period) and the
++		 * buffer status bit latches until cleared, so a delayed
++		 * 'finger down' is picked up on the next interrupt. Releases
++		 * happen while contacts are active and get the full timeout.
++		 */
++		if (!ts->contacts_active)
+ 			break;
+ 
+ 		usleep_range(1000, 2000); /* Poll every 1 - 2 ms */
+@@ -483,6 +498,9 @@
+ 	if (touch_num < 0)
+ 		return;
+ 
++	ts->contacts_active = touch_num > 0 ||
++			      (point_data[0] & GOODIX_HAVE_KEY);
++
+ 	/* The pen being down is always reported as a single touch */
+ 	if (touch_num == 1 && (point_data[1] & 0x80)) {
+ 		goodix_ts_report_pen_down(ts, point_data);

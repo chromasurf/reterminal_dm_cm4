@@ -35,6 +35,9 @@ hdmi_ignore_hotplug:0=1
 
 dtparam=i2c_arm=on
 dtparam=i2c_vc=on
+# The GT9271 touch controller sits on i2c_vc (behind the CSI/DSI mux).
+# 400 kHz is the datasheet maximum; the firmware default is 100 kHz.
+dtparam=i2c_vc_baudrate=400000
 dtparam=i2s=on
 dtparam=spi=on
 dtparam=audio=on
@@ -58,5 +61,5 @@ dtoverlay=i2c3,pins_4_5
 dtoverlay=disable-bt
 dtoverlay=disable-wifi
 
-dtoverlay=reTerminal-DM,tp_rotate=1
+dtoverlay=reTerminal-DM
 dtoverlay=tpm-spi-slx9670
