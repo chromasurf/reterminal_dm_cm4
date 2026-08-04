@@ -12,11 +12,43 @@ follows:
    releases, and Linux kernel updates. They're also made to fix bugs and add
    features to the build infrastructure.
 
+## v1.2.4
+
+Makes a firmware that fails to boot say so. All three changes come out of
+bringing up `myelin_demo` on this image, where a broken release was invisible
+for a day because the console pointed at a display the browser had taken over.
+
+* Changes
+  * `rootfs_overlay/etc/erlinit.config`: send the IEx prompt to `ttyS0` instead
+    of `tty1`. On a kiosk Cog owns the DRM device, so a prompt on `tty1` cannot
+    be reached — and since everything the VM writes follows this setting, crash
+    reports went there too. A firmware that died during boot was
+    indistinguishable from one with a black screen. `-s /usr/bin/nbtty` now also
+    matches what its own comment says it is for. Downstream can put it back with
+    `config :nerves, :erlinit, ctty: "tty1"`.
+  * `cmdline-a.txt` / `cmdline-b.txt`: `loglevel=0` → `loglevel=7`. At 0 even a
+    kernel failure during early boot is silent, before Erlang starts and
+    `nerves_logging`'s kmsg tailer can pick anything up. The kernel console is on
+    `tty3`, so this does not reach the panel and the kiosk stays clean.
+  * `README.md`: replace the `modprobe -r vc4` recommendation for a DSI panel
+    that did not come up with a conditional `vc4-drm` unbind/bind. Unloading the
+    module takes the framebuffer with it — including, by default, the one the
+    Erlang console sits on — so calling it from a supervisor's `init/1` pulls the
+    console out from under the VM mid-boot. Note `examples/kiosk.ex` still shows
+    the modprobe cycle for the Weston setup.
+
 ## v1.2.3
 
 Touch input fixes for the reTerminal DM (GT9271): report rate goes from
 ~43 Hz to ~96 Hz (median report interval 23.3 ms → 10.3 ms, measured via
 evdev SYN_REPORT timestamps while swiping).
+
+**Note on the published artifact:** the asset originally attached to the v1.2.3
+release was built from a working tree with uncommitted README changes, so its
+checksum (`E5674FF`) matched no published commit and consumers pinning
+`tag: "v1.2.3"` could not resolve it. It was replaced with `07F6884`, built from
+the tagged source. `README.md` is part of `package_files()`, so a documentation
+change alone invalidates every artifact — never change it without a release.
 
 * Changes
   * Ship `rootfs_overlay/lib/firmware/goodix_9271_cfg.bin` — a retuned

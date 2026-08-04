@@ -89,12 +89,35 @@ The 10.1" 800x1280 DSI display is configured with 270 degree rotation. Kernel cm
 
 ### Display Initialization
 
-The DSI display might not start by itself on some units. Forcing a modprobe cycle after udev setup helps:
+The DSI display might not start by itself on some units — after a warm reboot vc4
+can leave the DSI PHY in a state a fresh probe would have avoided. Rebind the
+driver, and only when the panel is actually not up:
 
 ```elixir
-:os.cmd(~c"modprobe -r vc4")
-:os.cmd(~c"modprobe vc4")
+if dsi_connected?() do
+  :ok
+else
+  # "gpu" is the platform device the vc4-drm driver binds to.
+  File.write("/sys/bus/platform/drivers/vc4-drm/unbind", "gpu")
+  Process.sleep(200)
+  File.write("/sys/bus/platform/drivers/vc4-drm/bind", "gpu")
+  System.cmd("udevadm", ["settle", "--timeout=10"])
+end
+
+defp dsi_connected? do
+  Path.wildcard("/sys/class/drm/card*-DSI-1/status")
+  |> Enum.any?(&match?({:ok, "connected\n"}, File.read(&1)))
+end
 ```
+
+**Do not use `modprobe -r vc4` for this.** Unloading the module takes the
+framebuffer with it — and by default that framebuffer carries the Erlang console
+(see `rootfs_overlay/etc/erlinit.config`). Doing it from an application's
+supervisor `init/1` therefore pulls the console out from under the VM mid-boot.
+A rebind re-probes every display component without touching the module.
+
+Unconditionally is also wrong: a rebind on a panel that is already up costs a
+black screen for a moment and buys nothing, so read the connector status first.
 
 ### Backlight
 
