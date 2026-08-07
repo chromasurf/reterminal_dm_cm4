@@ -124,6 +124,7 @@ defmodule ReterminalDmCm4.MixProject do
       "linux-6.18.defconfig",
       "mix.exs",
       "nerves_defconfig",
+      "patches",
       "Config.in",
       "busybox_defconfig",
       "post-build.sh",

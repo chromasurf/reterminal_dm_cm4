@@ -89,9 +89,9 @@ The 10.1" 800x1280 DSI display is configured with 270 degree rotation. Kernel cm
 
 ### Display Initialization
 
-The DSI display might not start by itself on some units — after a warm reboot vc4
-can leave the DSI PHY in a state a fresh probe would have avoided. Rebind the
-driver, and only when the panel is actually not up:
+After a warm reboot the DSI panel may fail to come up (vc4 can leave the DSI PHY in
+a bad state). If that happens, rebind the vc4-drm driver — but only after checking
+that the panel is actually down, since a rebind briefly blanks a working display:
 
 ```elixir
 if dsi_connected?() do
@@ -110,14 +110,9 @@ defp dsi_connected? do
 end
 ```
 
-**Do not use `modprobe -r vc4` for this.** Unloading the module takes the
-framebuffer with it — and by default that framebuffer carries the Erlang console
-(see `rootfs_overlay/etc/erlinit.config`). Doing it from an application's
-supervisor `init/1` therefore pulls the console out from under the VM mid-boot.
-A rebind re-probes every display component without touching the module.
-
-Unconditionally is also wrong: a rebind on a panel that is already up costs a
-black screen for a moment and buys nothing, so read the connector status first.
+Do not use `modprobe -r vc4` for this: unloading the module takes the framebuffer —
+and with it the Erlang console — down as well. A rebind re-probes every display
+component without touching the module.
 
 ### Backlight
 
@@ -151,19 +146,15 @@ Remote WebKit Inspector is available on port 9222 when `WEBKIT_INSPECTOR_HTTP_SE
 The system ships with three performance defaults; apps do not need to configure anything:
 
 - **GPU painting**: `/etc/erlinit.config` sets `WEBKIT_SKIA_GPU_PAINTING_THREADS=4`, so
-  WPE WebKit's Skia rasterizes on the v3d GPU. Cog inherits the variable through the
-  BEAM's environment. Without it, Skia paints on the CPU with `nCores/2` worker threads
-  (measured: ~30 fps instead of ~60 fps when scrolling image-heavy pages). Override per
-  launch via the `env:` option of the process that starts Cog.
-- **CPU governor**: the kernel defaults to `performance`
-  (`CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE`). `schedutil` idles at 600 MHz and
-  oscillates under scroll load, which costs frame deadlines (p50 27 ms vs 17 ms).
-- **Transparent Hugepages**: enabled (`CONFIG_TRANSPARENT_HUGEPAGE`), which lets the
-  v3d driver use Super Pages (boot log: `v3d … Using Transparent Hugepages`).
+  WPE WebKit's Skia rasterizes on the v3d GPU instead of the CPU — roughly twice the
+  frame rate when scrolling image-heavy pages. Override per launch via the `env:`
+  option of the process that starts Cog.
+- **CPU governor**: the kernel defaults to `performance`; `schedutil` costs frame
+  deadlines under scroll load.
+- **Transparent Hugepages**: enabled, which lets the v3d driver use Super Pages.
 
 Known limitation: content with `box-shadow` on scrolling surfaces stalls WPE 2.50's
 rendering pipeline regardless of these settings — avoid soft shadows in kiosk UIs.
-Analysis and reproduction: `docs/wpe-box-shadow-raf-stall.md` in the chromasurf monorepo.
 
 ## Audio
 
