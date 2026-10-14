@@ -12,6 +12,15 @@ follows:
    releases, and Linux kernel updates. They're also made to fix bugs and add
    features to the build infrastructure.
 
+## Unreleased
+
+* Changes
+  * `rootfs_overlay/usr/sbin/early_modules`, run as erlinit `--pre-run-exec`:
+    loads kernel modules before the Erlang VM starts, the display path first and
+    v3d after vc4. On a reTerminal DM vc4 is ready at 2.97 s instead of 5.03 s,
+    v3d at 3.04 s, `/dev/fb0` at 3.38 s instead of 5.31 s, and the panel is
+    `/dev/dri/card0` on every boot. See README, "Boot".
+
 ## v1.2.7
 
 Takes the kernel log off the panel, and drops the `nerves_container` add-on now

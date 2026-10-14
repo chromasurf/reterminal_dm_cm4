@@ -81,6 +81,32 @@ File.write("/sys/class/leds/usr-buzzer/brightness", "1")
 File.write("/sys/class/leds/usr-buzzer/brightness", "0")
 ```
 
+## Boot
+
+`/usr/sbin/early_modules` runs as erlinit `pre_run_exec` and loads kernel
+modules before the Erlang VM starts. Without it nerves_uevent coldplugs them
+~1.4 s after the VM launches, one at a time, and vc4 binds only once its last
+component is there. Measured on a reTerminal DM:
+
+| | nerves_uevent only | early_modules |
+|---|---|---|
+| vc4 (panel) | 5.03 s | 2.97 s |
+| v3d (GPU) | ~5.1 s | 3.04 s |
+| `/dev/fb0` | 5.31 s | 3.38 s |
+
+The script loads `vc4`, `pwm-bcm2835` and `i2c-mux-pinctrl` first, then every
+device modalias except v3d: each driver that binds makes the kernel retry the
+deferred vc4. v3d follows once `/sys/class/drm/card0` exists. vc4 and v3d
+otherwise register in either order, so the panel was `card0` on some boots and
+`card1` on others; with the script it is `/dev/dri/card0`.
+
+busybox here has no sub-second `sleep`; the script waits with `read -t 0.02`
+on an empty FIFO made by `mknod`.
+
+An app that sets its own `pre_run_exec` (a splash script, for example) replaces
+this one and calls `/usr/sbin/early_modules` from it; the script returns at once.
+Without it nerves_uevent still loads every module, in the old order.
+
 ## Display
 
 ### DSI Configuration
