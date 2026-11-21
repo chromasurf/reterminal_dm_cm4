@@ -6,20 +6,23 @@
 # Uses RPi4 native tryboot for automatic firmware rollback.
 # See fwup_include/fwup-common.conf for the partition layout.
 #
-require-fwup-version="1.0.0"
+require-fwup-version="1.12.0"
 
 include("${NERVES_SDK_IMAGES:-.}/fwup_include/fwup-common.conf")
+
+# An app replaces these boot files by setting the variable in the environment of `mix firmware`.
+define(CHROMASURF_CONFIG_TXT, "${NERVES_SYSTEM}/images/config.txt")
+define(CHROMASURF_CMDLINE_A, "${NERVES_SYSTEM}/images/cmdline-a.txt")
+define(CHROMASURF_CMDLINE_B, "${NERVES_SYSTEM}/images/cmdline-b.txt")
 <%
 # Boot resources that go to the active boot partition.
 # start4.elf is handled separately — on complete it goes to AUTOBOOT + BOOT,
 # on upgrade it only goes to the target boot partition.
 boot_resources = [
   %{name: "fixup4.dat", path: "${NERVES_SYSTEM}/images/rpi-firmware/fixup4x.dat"},
-  %{name: "config.txt", path: "${NERVES_SYSTEM}/images/config.txt"},
-  %{name: "kernel8.img", path: "${NERVES_SYSTEM}/images/Image"},
-  %{name: "bcm2711-rpi-4-b.dtb", path: "${NERVES_SYSTEM}/images/bcm2711-rpi-4-b.dtb"},
+  %{name: "config.txt", path: "${CHROMASURF_CONFIG_TXT}"},
+  %{name: "kernel8.img", path: "${NERVES_SYSTEM}/images/kernel8.img.gz"},
   %{name: "bcm2711-rpi-cm4.dtb", path: "${NERVES_SYSTEM}/images/bcm2711-rpi-cm4.dtb"},
-  %{name: "bcm2711-rpi-400.dtb", path: "${NERVES_SYSTEM}/images/bcm2711-rpi-400.dtb"},
   %{name: "overlays/dwc2.dtbo", path: "${NERVES_SYSTEM}/images/rpi-firmware/overlays/dwc2.dtbo"},
   %{name: "overlays/i2c-mux.dtbo", path: "${NERVES_SYSTEM}/images/rpi-firmware/overlays/i2c-mux.dtbo"},
   %{name: "overlays/imx219.dtbo", path: "${NERVES_SYSTEM}/images/rpi-firmware/overlays/imx219.dtbo"},
@@ -42,8 +45,6 @@ boot_resources = [
   %{name: "overlays/vc4-kms-v3d.dtbo", path: "${NERVES_SYSTEM}/images/rpi-firmware/overlays/vc4-kms-v3d.dtbo"},
   %{name: "overlays/vc4-kms-v3d-pi4.dtbo", path: "${NERVES_SYSTEM}/images/rpi-firmware/overlays/vc4-kms-v3d-pi4.dtbo"},
   %{name: "overlays/w1-gpio-pullup.dtbo", path: "${NERVES_SYSTEM}/images/rpi-firmware/overlays/w1-gpio-pullup.dtbo"},
-  # TPM
-  %{name: "overlays/tpm-spi-slx9670.dtbo", path: "${NERVES_SYSTEM}/images/rpi-firmware/overlays/tpm-spi-slx9670.dtbo"},
   # Rethings resources
   %{name: "overlays/reTerminal-DM.dtbo", path: "${NERVES_SYSTEM}/images/rpi-firmware/overlays/reTerminal-DM.dtbo"},
 ]
@@ -53,8 +54,8 @@ start4_elf = %{name: "start4.elf", path: "${NERVES_SYSTEM}/images/rpi-firmware/s
 
 # All resources for file-resource declarations (boot + start4 + cmdline variants)
 all_resources = [start4_elf] ++ boot_resources ++ [
-  %{name: "cmdline-a.txt", path: "${NERVES_SYSTEM}/images/cmdline-a.txt"},
-  %{name: "cmdline-b.txt", path: "${NERVES_SYSTEM}/images/cmdline-b.txt"},
+  %{name: "cmdline-a.txt", path: "${CHROMASURF_CMDLINE_A}"},
+  %{name: "cmdline-b.txt", path: "${CHROMASURF_CMDLINE_B}"},
 ]
 %>
 # File resources are listed in the order that they are included in the .fw file
@@ -177,10 +178,18 @@ task upgrade.a {
     on-resource autoboot-b.txt { }
 
     # start4.elf only goes to target boot partition (not AUTOBOOT) during upgrade
-    on-resource start4.elf { fat_write(${BOOT_A_PART_OFFSET}, "start4.elf") }
+    on-resource start4.elf {
+        delta-source-fat-offset=${BOOT_B_PART_OFFSET}
+        delta-source-fat-path="start4.elf"
+        fat_write(${BOOT_A_PART_OFFSET}, "start4.elf")
+    }
 
     # Write boot resources to BOOT_A
-<%= for resource <- boot_resources do %>    on-resource <%= resource.name %> { fat_write(${BOOT_A_PART_OFFSET}, "<%= resource.name %>") }
+<%= for resource <- boot_resources do %>    on-resource <%= resource.name %> {
+        delta-source-fat-offset=${BOOT_B_PART_OFFSET}
+        delta-source-fat-path="<%= resource.name %>"
+        fat_write(${BOOT_A_PART_OFFSET}, "<%= resource.name %>")
+    }
 <% end %>
     on-resource cmdline-a.txt { fat_write(${BOOT_A_PART_OFFSET}, "cmdline.txt") }
     on-resource cmdline-b.txt { }
@@ -245,10 +254,18 @@ task upgrade.b {
     on-resource autoboot-b.txt { }
 
     # start4.elf only goes to target boot partition (not AUTOBOOT) during upgrade
-    on-resource start4.elf { fat_write(${BOOT_B_PART_OFFSET}, "start4.elf") }
+    on-resource start4.elf {
+        delta-source-fat-offset=${BOOT_A_PART_OFFSET}
+        delta-source-fat-path="start4.elf"
+        fat_write(${BOOT_B_PART_OFFSET}, "start4.elf")
+    }
 
     # Write boot resources to BOOT_B
-<%= for resource <- boot_resources do %>    on-resource <%= resource.name %> { fat_write(${BOOT_B_PART_OFFSET}, "<%= resource.name %>") }
+<%= for resource <- boot_resources do %>    on-resource <%= resource.name %> {
+        delta-source-fat-offset=${BOOT_A_PART_OFFSET}
+        delta-source-fat-path="<%= resource.name %>"
+        fat_write(${BOOT_B_PART_OFFSET}, "<%= resource.name %>")
+    }
 <% end %>
     on-resource cmdline-a.txt { }
     on-resource cmdline-b.txt { fat_write(${BOOT_B_PART_OFFSET}, "cmdline.txt") }

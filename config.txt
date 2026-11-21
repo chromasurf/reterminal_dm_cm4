@@ -2,6 +2,10 @@ arm_64bit=1
 start_file=start4.elf
 fixup_file=fixup4.dat
 
+# No file search: the firmware loads exactly these two.
+kernel=kernel8.img
+device_tree=bcm2711-rpi-cm4.dtb
+
 # Optional Overclocking: Max for cm4
 # https://www.jeffgeerling.com/blog/2020/overclocking-raspberry-pi-compute-module-4
 
@@ -28,6 +32,9 @@ force_eeprom_read=0
 # the search for a display to speed up boot time.
 display_auto_detect=1
 hdmi_ignore_hotplug:0=1
+hdmi_ignore_hotplug:1=1
+# The kernel's KMS driver sets the display up; the firmware does not probe EDID for it.
+disable_fw_kms_setup=1
 #disable_overscan=1
 #hdmi_enable_4kp60=1
 
@@ -42,6 +49,8 @@ dtparam=i2s=on
 dtparam=spi=on
 dtparam=audio=on
 dtparam=ant2=on
+# Nothing sits on the DM's PCIe lane; brcm-pcie waited 343 ms for a link before init.
+dtparam=pcie=off
 
 enable_uart=1
 max_framebuffers=2
@@ -58,8 +67,5 @@ dtoverlay=vc4-kms-v3d,cma-512
 dtoverlay=i2c1,pins_2_3
 dtoverlay=i2c3,pins_4_5
 
-dtoverlay=disable-bt
-dtoverlay=disable-wifi
-
 dtoverlay=reTerminal-DM
-dtoverlay=tpm-spi-slx9670
+# No tpm-spi-slx9670: the reTerminal DM has no TPM, spi0 CS0 is the MCP2518FD CAN controller.
