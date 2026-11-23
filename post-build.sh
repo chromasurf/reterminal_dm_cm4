@@ -2,8 +2,10 @@
 
 set -e
 
-# Trim down staging so that the artifacts can be hosted on GitHub releases
+# Trim down staging so that the artifacts can be hosted on GitHub releases. libWPEWebKit stays as
+# the stripped target copy, so apps can link against WPE WebKit.
 rm -fr $STAGING_DIR/usr/lib/dri $STAGING_DIR/usr/lib/libWPEWebKit-2.0.so* $STAGING_DIR/usr/lib/wpe-webkit-2.0
+cp -a $TARGET_DIR/usr/lib/libWPEWebKit-2.0.so* $STAGING_DIR/usr/lib/
 
 # Create the fwup ops script to handling MicroSD/eMMC operations at runtime
 # NOTE: revert.fw is the previous, more limited version of this. ops.fw is

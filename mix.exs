@@ -12,30 +12,29 @@ defmodule ReterminalDmCm4.MixProject do
     [
       app: @app,
       version: @version,
-      # Because we're using OTP 28, we need to enforce Elixir 1.17 or later.
       elixir: "~> 1.17",
       compilers: Mix.compilers() ++ [:nerves_package],
       nerves_package: nerves_package(),
       description: description(),
       package: package(),
       deps: deps(),
-      aliases: [loadconfig: [&bootstrap/1], generate_fwup_conf: &generate_fwup_conf/1],
+      aliases: [
+        compile: [&generate_fwup_conf/1, "compile"],
+        generate_fwup_conf: &generate_fwup_conf/1
+      ],
       docs: docs()
     ]
   end
 
   def cli do
-    [preferred_envs: %{docs: :docs, "hex.build": :docs, "hex.publish": :docs}]
+    [
+      preferred_envs: %{docs: :docs, "hex.build": :docs, "hex.publish": :docs},
+      default_target: :target
+    ]
   end
 
   def application do
     []
-  end
-
-  defp bootstrap(args) do
-    set_target()
-    Application.start(:nerves_bootstrap)
-    Mix.Task.run("loadconfig", args)
   end
 
   defp nerves_package do
@@ -44,9 +43,8 @@ defmodule ReterminalDmCm4.MixProject do
       artifact_sites: [
         {:github_releases, "#{@github_organization}/#{@app}"}
       ],
-      # WebKit compilation is memory-hungry: give the build VM all host RAM
-      # and cap parallelism so ~9 concurrent WebCore TUs (2-4 GB each) fit —
-      # -j13 on 32G hosts gets the compiler OOM-killed.
+      # 8 jobs keep ~9 concurrent WebCore TUs (2-4 GB each) within the VM's RAM.
+      # At -j13 on a 32 GB host the compiler was OOM-killed.
       build_runner_config: [cpus: 8, memory: :host],
       build_runner_opts: build_runner_opts(),
       platform: Nerves.System.BR,
@@ -64,15 +62,15 @@ defmodule ReterminalDmCm4.MixProject do
         {"TARGET_GCC_FLAGS",
          "-mabi=lp64 -fstack-protector-strong -mcpu=cortex-a72 -fPIE -pie -Wl,-z,now -Wl,-z,relro"}
       ],
-      checksum: package_files()
+      checksum: source_finger_print_files()
     ]
   end
 
   defp deps do
     [
-      {:nerves, "~> 1.15", runtime: false},
-      {:nerves_system_br, "1.34.0", runtime: false},
-      {:nerves_toolchain_aarch64_nerves_linux_gnu, "~> 15.3.0", runtime: false},
+      {:nerves, "~> 1.15 or ~> 2.0 or ~> 2.0.0-dev", runtime: false},
+      {:nerves_system_br, "1.35.3", runtime: false},
+      {:nerves_toolchain_aarch64_nerves_linux_gnu, "~> 15.3.1", runtime: false},
       {:nerves_system_linter, "~> 0.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.22", only: :docs, runtime: false}
     ]
@@ -102,8 +100,16 @@ defmodule ReterminalDmCm4.MixProject do
   end
 
   defp package_files do
+    ["fwup.conf" | source_finger_print_files()]
+  end
+
+  # fwup.conf is rendered from fwup.conf.eex, so the checksum covers only the template.
+  defp source_finger_print_files do
     [
+      "app.txt",
+      "config/config.exs",
       "fwup_include",
+      "package",
       "rootfs_overlay",
       "CHANGELOG.md",
       "cmdline-a.txt",
@@ -113,7 +119,6 @@ defmodule ReterminalDmCm4.MixProject do
       "fwup_include/fwup-common.conf",
       "fwup_include/provisioning.conf",
       "fwup.conf.eex",
-      "fwup.conf",
       "LICENSE",
       "linux",
       "linux-6.18.defconfig",
@@ -142,22 +147,16 @@ defmodule ReterminalDmCm4.MixProject do
     end
   end
 
-  defp set_target() do
-    if function_exported?(Mix, :target, 1) do
-      apply(Mix, :target, [:target])
-    else
-      System.put_env("MIX_TARGET", "target")
-    end
-  end
-
   defp generate_fwup_conf(_args) do
     template_path = Path.join(__DIR__, "fwup.conf.eex")
     output_path = Path.join(__DIR__, "fwup.conf")
 
-    Mix.shell().info("Generating fwup.conf")
-
     content = EEx.eval_file(template_path)
-    File.write!(output_path, content)
-    Mix.shell().info("Successfully generated #{output_path}")
+
+    # The build VM has no Elixir, so fwup.conf is rendered on the host before every build.
+    if File.read(output_path) != {:ok, content} do
+      File.write!(output_path, content)
+      Mix.shell().info("Generated #{output_path}")
+    end
   end
 end

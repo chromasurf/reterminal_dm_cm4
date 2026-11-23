@@ -218,6 +218,7 @@
 				interrupts = <27 2>; // high-to-low edge triggered
 				irq-gpios = <&gpio 27 0>;
 				reset-gpios = <&pcf857x 7 0>;
+				// Touch coordinates in panel pixels (800 x 1280, portrait).
 				touchscreen-inverted-y;
 				touchscreen-swapped-x-y;
 			};

@@ -1,0 +1,32 @@
+#!/bin/sh
+# Loads kernel modules before the Erlang VM starts; nerves_uevent coldplugs them about 1.4 s after VM start.
+# The display modules load first, because every other driver that binds makes the kernel retry the deferred
+# vc4. v3d loads after vc4 has registered card0, so the panel is /dev/dri/card0 on every boot. boot_splash
+# calls it; with a custom pre_run_exec, call it from there. Returns at once; the work runs in the background.
+(
+  TICK=/tmp/.early_modules_tick
+  mknod "$TICK" p 2>/dev/null
+
+  # vc4's HDMI bind returns -EPROBE_DEFER until snd-soc-hdmi-codec is loaded, and the DSI panel binds
+  # after vc4.
+  modprobe -a vc4 snd-soc-hdmi-codec pwm-bcm2835 i2c-mux-pinctrl 2>/dev/null
+
+  aliases=""
+  for f in $(find /sys/devices -name modalias); do
+    case "$f" in
+      *.v3d/*) ;;
+      *) aliases="$aliases $(cat "$f")" ;;
+    esac
+  done
+  modprobe -a $aliases 2>/dev/null &
+
+  # Waits up to 10 s in 20 ms steps. read -t on an empty FIFO is the only sub-second sleep in busybox ash.
+  count=0
+  while [ ! -e /sys/class/drm/card0 ] && [ $count -lt 500 ]; do
+    read -t 0.02 _ <> "$TICK"
+    count=$((count + 1))
+  done
+  rm -f "$TICK"
+
+  modprobe v3d
+) &

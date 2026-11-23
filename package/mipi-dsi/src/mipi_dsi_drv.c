@@ -405,7 +405,8 @@ static int i2c_md_probe(struct i2c_client *i2c, const struct i2c_device_id *id)
 		dev_err(dev, "I2C read id failed: %d\n", ret);
 		return -ENODEV;
 	}
-	if (ret != 0xC3) {
+	/* 0x43 is the answer after a warm reboot; retries read the same value. */
+	if (ret != 0xC3 && ret != 0x43) {
 		int retries;
 		for (retries = 0; retries < 3; retries++) {
 			msleep(100);
@@ -413,14 +414,12 @@ static int i2c_md_probe(struct i2c_client *i2c, const struct i2c_device_id *id)
 			if (ret == 0xC3)
 				break;
 		}
-		if (ret != 0xC3) {
-			if (ret == 0x43) {
-				dev_warn(dev, "STM32 returned degraded chip id 0x43 after warm reboot, continuing\n");
-			} else {
-				dev_err(dev, "Unknown chip id: 0x%02x\n", ret);
-				return -ENODEV;
-			}
-		}
+	}
+	if (ret == 0x43) {
+		dev_warn(dev, "STM32 returned degraded chip id 0x43 after warm reboot, continuing\n");
+	} else if (ret != 0xC3) {
+		dev_err(dev, "Unknown chip id: 0x%02x\n", ret);
+		return -ENODEV;
 	}
 
 	ret = i2c_md_read(md, REG_TP_VERSION, mcu_img_ver, ARRAY_SIZE(mcu_img_ver));
