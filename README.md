@@ -169,7 +169,7 @@ Remote WebKit Inspector is available on port 9222 when `WEBKIT_INSPECTOR_HTTP_SE
 
 ### Rendering Performance
 
-The system ships with three performance defaults; apps do not need to configure anything:
+The system ships with four performance defaults; apps do not need to configure anything:
 
 - **GPU painting**: `/etc/erlinit.config` sets `WEBKIT_SKIA_GPU_PAINTING_THREADS=4`, so
   WPE WebKit's Skia rasterizes on the v3d GPU instead of the CPU — roughly twice the
@@ -178,6 +178,9 @@ The system ships with three performance defaults; apps do not need to configure 
 - **CPU governor**: the kernel defaults to `performance`; `schedutil` costs frame
   deadlines under scroll load.
 - **Transparent Hugepages**: enabled, which lets the v3d driver use Super Pages.
+- **Malloc arenas**: `/etc/erlinit.config` sets `MALLOC_ARENA_MAX=2` for the BEAM and the
+  programs it starts. With glibc's default of up to 32 arenas, a BEAM with the Emerge
+  renderer settled at 380 MB RSS in a soak test instead of 190 MB.
 
 Known limitation: content with `box-shadow` on scrolling surfaces stalls WPE 2.50's
 rendering pipeline regardless of these settings — avoid soft shadows in kiosk UIs.

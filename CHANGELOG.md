@@ -30,6 +30,11 @@ under Nerves 1 and Nerves 2.
     with the same toolchain the system is built with.
 
 * Changes
+  * At most two malloc arenas: `/etc/erlinit.config` sets `MALLOC_ARENA_MAX=2`
+    for the BEAM and the programs it starts. With glibc's default of up to 32
+    arenas, the RSS of a BEAM with the Emerge renderer grew by 12–20 MB per
+    renderer start and settled at 380 MB in a soak test; with two arenas it
+    stayed at 182–195 MB.
   * `cmdline-a.txt` / `cmdline-b.txt`: `loglevel=4` instead of 7. The serial
     console at 115200 baud replayed the full kernel log; root mounts at 0.78 s
     instead of 2.23 s, `/dev/fb0` appears at 1.61 s instead of 3.51 s.
