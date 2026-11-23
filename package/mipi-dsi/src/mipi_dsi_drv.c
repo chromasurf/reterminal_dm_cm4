@@ -405,7 +405,7 @@ static int i2c_md_probe(struct i2c_client *i2c, const struct i2c_device_id *id)
 		dev_err(dev, "I2C read id failed: %d\n", ret);
 		return -ENODEV;
 	}
-	/* No retries on 0x43: after a warm reboot it stayed 0x43 through all three, 300 ms for nothing. */
+	/* 0x43 is the answer after a warm reboot; retries read the same value. */
 	if (ret != 0xC3 && ret != 0x43) {
 		int retries;
 		for (retries = 0; retries < 3; retries++) {

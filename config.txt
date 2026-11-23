@@ -2,11 +2,11 @@ arm_64bit=1
 start_file=start4.elf
 fixup_file=fixup4.dat
 
-# No file search: the firmware loads exactly these two.
+# The firmware loads these two files without searching for them.
 kernel=kernel8.img
 device_tree=bcm2711-rpi-cm4.dtb
 
-# Optional Overclocking: Max for cm4
+# Overclocked to the CM4 limits:
 # https://www.jeffgeerling.com/blog/2020/overclocking-raspberry-pi-compute-module-4
 
 over_voltage=6
@@ -15,21 +15,22 @@ over_voltage=6
 arm_freq=2000
 
 gpu_freq=750
-gpu_mem=256
+# Firmware memory for codecs and the camera ISP. KMS and v3d allocate from CMA (cma-512).
+# 76 MB is the Pi 4 default and enough for the H.264 decoder (/dev/video10). See README, "GPU Memory".
+gpu_mem=76
 
 arm_boost=1
 initial_turbo=60
 boot_delay=0
 boot_delay_ms=0
 
-# skip some blocks =============================
+# Probes skipped at boot =======================
 
 camera_auto_detect=0
 disable_splash=1
 force_eeprom_read=0
 
-# If your device does not use external HDMI, skip over
-# the search for a display to speed up boot time.
+# The firmware ignores both HDMI ports; the display is the DSI panel.
 display_auto_detect=1
 hdmi_ignore_hotplug:0=1
 hdmi_ignore_hotplug:1=1
@@ -42,25 +43,24 @@ disable_fw_kms_setup=1
 
 dtparam=i2c_arm=on
 dtparam=i2c_vc=on
-# The GT9271 touch controller sits on i2c_vc (behind the CSI/DSI mux).
+# The GT9271 touch controller is on i2c_vc, behind the CSI/DSI mux.
 # 400 kHz is the datasheet maximum; the firmware default is 100 kHz.
 dtparam=i2c_vc_baudrate=400000
 dtparam=i2s=on
 dtparam=spi=on
 dtparam=audio=on
 dtparam=ant2=on
-# Nothing sits on the DM's PCIe lane; brcm-pcie waited 343 ms for a link before init.
+# No device on the DM's PCIe lane. Link training timed out after 343 ms, before init.
 dtparam=pcie=off
 
 enable_uart=1
 max_framebuffers=2
 
 # Overlays ============================
-# The ramoops overlay works with the pstore driver to preserve crash
-# information across reboots in DRAM
-dtoverlay=ramoops
+# pstore. Kernel console and panic dumps survive a watchdog reset in /sys/fs/pstore.
+dtoverlay=ramoops-pi4,total-size=0x20000,record-size=0x4000,console-size=0x8000,pmsg-size=0x8000
 
-# For the CM4 I/O board, USB is disabled by default. This enables it.
+# USB host mode. USB is off by default on the CM4.
 dtoverlay=dwc2,dr_mode=host
 dtoverlay=vc4-kms-v3d,cma-512
 
@@ -68,4 +68,7 @@ dtoverlay=i2c1,pins_2_3
 dtoverlay=i2c3,pins_4_5
 
 dtoverlay=reTerminal-DM
-# No tpm-spi-slx9670: the reTerminal DM has no TPM, spi0 CS0 is the MCP2518FD CAN controller.
+# No tpm-spi-slx9670. The reTerminal DM has no TPM; spi0 CS0 is the MCP2518FD CAN controller.
+
+# Last line, so app.txt overrides the lines above. To replace app.txt, set CHROMASURF_CONFIG_APP.
+include app.txt

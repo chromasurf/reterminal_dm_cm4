@@ -7,7 +7,7 @@
 # Remember to bump the version when anything changes in this
 # directory.
 RETHINGS_SOURCE =
-RETHINGS_VERSION = 0.0.2
+RETHINGS_VERSION = 0.0.4
 RETHINGS_DEPENDENCIES += host-dtc
 
 define RETHINGS_BUILD_CMDS

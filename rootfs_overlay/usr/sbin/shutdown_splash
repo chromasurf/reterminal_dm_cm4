@@ -1,0 +1,12 @@
+#!/bin/sh
+# erlinit's run_on_exit. Runs an executable /etc/splash.d/shutdown, or shows /etc/shutdown.png, or
+# /usr/share/chromasurf/shutdown.png.
+[ -e /dev/fb0 ] || exit 0
+
+if [ -x /etc/splash.d/shutdown ]; then
+  exec /etc/splash.d/shutdown
+elif [ -f /etc/shutdown.png ]; then
+  /usr/bin/fbv /etc/shutdown.png </dev/null >/dev/null 2>&1
+else
+  /usr/bin/fbv /usr/share/chromasurf/shutdown.png </dev/null >/dev/null 2>&1
+fi

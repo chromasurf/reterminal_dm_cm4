@@ -1,4 +1,4 @@
-# Firmware configuration file for the Raspberry Pi 4 and CM4 SeeedStudio Devices
+# fwup configuration for the reTerminal DM (CM4).
 #
 # IMPORTANT:
 # Edit `fwup.conf.eex` and run `mix generate_fwup_conf` to generate fwup.conf.
@@ -10,17 +10,19 @@ require-fwup-version="1.12.0"
 
 include("${NERVES_SDK_IMAGES:-.}/fwup_include/fwup-common.conf")
 
-# An app replaces these boot files by setting the variable in the environment of `mix firmware`.
+# To replace a boot file, set its variable in the environment of `mix firmware`.
 define(CHROMASURF_CONFIG_TXT, "${NERVES_SYSTEM}/images/config.txt")
+define(CHROMASURF_CONFIG_APP, "${NERVES_SYSTEM}/images/app.txt")
 define(CHROMASURF_CMDLINE_A, "${NERVES_SYSTEM}/images/cmdline-a.txt")
 define(CHROMASURF_CMDLINE_B, "${NERVES_SYSTEM}/images/cmdline-b.txt")
 <%
 # Boot resources that go to the active boot partition.
-# start4.elf is handled separately — on complete it goes to AUTOBOOT + BOOT,
-# on upgrade it only goes to the target boot partition.
+# start4.elf is separate. `complete` writes it to AUTOBOOT and BOOT, an upgrade
+# only to the target boot partition.
 boot_resources = [
   %{name: "fixup4.dat", path: "${NERVES_SYSTEM}/images/rpi-firmware/fixup4x.dat"},
   %{name: "config.txt", path: "${CHROMASURF_CONFIG_TXT}"},
+  %{name: "app.txt", path: "${CHROMASURF_CONFIG_APP}"},
   %{name: "kernel8.img", path: "${NERVES_SYSTEM}/images/kernel8.img.gz"},
   %{name: "bcm2711-rpi-cm4.dtb", path: "${NERVES_SYSTEM}/images/bcm2711-rpi-cm4.dtb"},
   %{name: "overlays/dwc2.dtbo", path: "${NERVES_SYSTEM}/images/rpi-firmware/overlays/dwc2.dtbo"},
@@ -173,7 +175,7 @@ task upgrade.a {
         trim(${ROOTFS_A_PART_OFFSET}, ${ROOTFS_A_PART_COUNT})
     }
 
-    # Autoboot resources are not written during upgrade — only on validate
+    # validate writes the autoboot files, an upgrade does not.
     on-resource autoboot-a.txt { }
     on-resource autoboot-b.txt { }
 
@@ -215,9 +217,8 @@ task upgrade.a {
         uboot_setenv(uboot-env, "a.nerves_fw_misc", ${NERVES_FW_MISC})
         uboot_setenv(uboot-env, "a.nerves_fw_uuid", "\${FWUP_META_UUID}")
 
-        # Tryboot: reboot into the new partition for validation
-        # The bootloader will use [tryboot] section of autoboot.txt
-        # If validate is never called, next normal reboot goes back to B
+        # The next reboot uses the [tryboot] section of autoboot.txt and starts A once.
+        # Without validate, the reboot after that starts B again.
         reboot_param("0 tryboot")
     }
 

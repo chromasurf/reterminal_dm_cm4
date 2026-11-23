@@ -1,0 +1,37 @@
+#!/bin/sh
+# erlinit's pre_run_exec. Runs early_modules and, once fb0 exists, shows /etc/splash.png or, without it,
+# /usr/share/chromasurf/splash.png. An executable /etc/splash.d/boot runs afterwards. Returns at once.
+
+/usr/sbin/early_modules
+
+# libinput reads LIBINPUT_CALIBRATION_MATRIX from the udev database, which udevd writes to /run/udev/data.
+# Only input devices: a full coldplug loads modules by modalias, and v3d could take card0 before vc4.
+(udevd -d && udevadm trigger --action=add --subsystem-match=input) >/dev/null 2>&1 &
+
+(
+  TICK=/tmp/.boot_splash_tick
+  mknod "$TICK" p 2>/dev/null
+
+  # Waits up to 5 s in 20 ms steps. read -t on an empty FIFO is the only sub-second sleep in busybox ash.
+  count=0
+  while [ ! -e /dev/fb0 ] && [ $count -lt 250 ]; do
+    read -t 0.02 _ <> "$TICK"
+    count=$((count + 1))
+  done
+  rm -f "$TICK"
+  [ -e /dev/fb0 ] || exit 0
+
+  # Unbinds fbcon so kernel messages do not draw over the picture. ttyS0 still prints them.
+  for vtcon in /sys/class/vtconsole/vtcon*; do
+    grep -q "frame buffer" "$vtcon/name" 2>/dev/null && echo 0 > "$vtcon/bind"
+  done
+
+  if [ -f /etc/splash.png ]; then
+    /usr/bin/fbv /etc/splash.png >/dev/null 2>&1
+  else
+    /usr/bin/fbv /usr/share/chromasurf/splash.png >/dev/null 2>&1
+  fi
+
+  [ -x /etc/splash.d/boot ] && /etc/splash.d/boot
+) &
+exit 0

@@ -28,6 +28,9 @@ under Nerves 1 and Nerves 2.
   * Target toolchain: the Nerves toolchain 15.3.0 (GCC 15.3, glibc 2.43)
     instead of the Arm GNU Toolchain 15.2 (glibc 2.42). Apps compile their NIFs
     with the same toolchain the system is built with.
+  * `ch34x`: WCH CH343 driver V2.1 instead of V1.5, from `seeed-linux-dtoverlays`
+    `ea4bca5`. No spurious data on the first open of the TTY, default baud rate
+    115200. The V2.1 `low_latency` change applies only below Linux 5.12.
 
 * Changes
   * At most two malloc arenas: `/etc/erlinit.config` sets `MALLOC_ARENA_MAX=2`
@@ -59,18 +62,75 @@ under Nerves 1 and Nerves 2.
     CS0 is the MCP2518FD CAN controller, which the TPM node displaced) and
     `disable-bt` / `disable-wifi` (their `.dtbo` files were never on the boot
     partition). The overlay is no longer built.
+  * `config.txt`: `gpu_mem=76` instead of 256. KMS renders through CMA
+    (`cma-512`); `gpu_mem` is the firmware's share for codecs and ISP, and 76 MB
+    runs the H.264 decoder. Linux gets 180 MB more.
+  * `config.txt`: pstore with `ramoops-pi4`, 128 KiB (kernel console, panic
+    dumps, pmsg), instead of `ramoops` with 64 KiB.
+  * Boot and shutdown pictures: erlinit runs `/usr/sbin/boot_splash`
+    (`early_modules`, polls fb0 every 20 ms, unbinds fbcon, shows the
+    picture) and `/usr/sbin/shutdown_splash`. The system pictures in
+    `/usr/share/chromasurf/` (800 × 1280) show the chromasurf wordmark with a
+    red, green and blue circle; the shutdown picture is dark grey. `/etc/splash.png` and
+    `/etc/shutdown.png` in the app's `rootfs_overlay` replace them. An
+    executable `/etc/splash.d/boot` runs after the boot picture,
+    `/etc/splash.d/shutdown` instead of the shutdown picture. Custom
+    `pre_run_exec` and `run_on_exit` hooks are no longer needed.
+  * fwup: `config.txt` ends with `include app.txt`. `CHROMASURF_CONFIG_APP`
+    points at an own `app.txt` that adds or overrides lines, without a copy
+    of the whole `config.txt`; the system's `app.txt` holds only a
+    comment. The firmware reads `gpu_mem` before it follows `include`.
+  * The artifact checksum covers `package/` (kernel modules, overlays) and
+    `app.txt`; before, a change there produced no new artifact.
+  * Kernel command line: `oops=panic` and `sysctl.kernel.panic_on_rcu_stall=1`.
+    An oops or an RCU stall reboots the device through the watchdog; README,
+    "Reboot on Kernel Errors", shows how to switch it off.
   * Only `bcm2711-rpi-cm4.dtb` is built and written; the Pi 4B and Pi 400
     device trees are gone.
+  * Touch: the GT9271 reports panel pixels (800 × 1280, `touchscreen-swapped-x-y`
+    and `touchscreen-inverted-y`), the framebuffer's coordinates. Emerge on DRM
+    works without `EMERGE_DRM_TOUCH_INVERT`. Remove the app's own
+    Cog calibration rule.
+  * Video in WebKit decodes H.264 on the hardware decoder: the system has the
+    GStreamer `video4linux2` plugin (`v4l2h264dec` on `/dev/video10`, with the m2m
+    probe) and `videoparsersbad`, whose `h264parse` repacks MP4 streams for it.
+    Before, `avdec_h264` decoded on the CPU: a 720p video took 179 % of a core in
+    the WebProcess, now 13 %.
+  * Staging keeps `libWPEWebKit-2.0.so` (the stripped target copy, 111 MB):
+    programs that use the WPE WebKit API, such as `emerge_webview`'s `wpe_host`,
+    link against the artifact's staging. Before, `post-build.sh` removed it.
+  * Cog starts in landscape without arguments: `/etc/erlinit.config` sets
+    `COG_PLATFORM_NAME=drm` and `COG_PLATFORM_PARAMS=renderer=gles,rotation=3`,
+    `/etc/udev/rules.d/99-touchscreen.rules` the matching touch matrix
+    `0 1 0 -1 0 1`, and `boot_splash` starts `udevd`, from whose database
+    libinput reads the matrix. README, "Rotation and Touch", lists the
+    matrices for the other rotations.
+  * `cog <url>` starts without further arguments: `/etc/erlinit.config` sets
+    `XDG_RUNTIME_DIR=/run`, and `video=HDMI-A-1:d` in the kernel command line
+    switches off the HDMI port that `vc4.force_hotplug=1` reports as connected,
+    so Cog selects DSI-1. Remove the app's own HDMI switch-off.
+  * Display rotation: the kernel command line no longer has `rotate=270`. With
+    the panel orientation (right-up) it added up to 180°, which fbdev applied as
+    the primary plane's rotation property; Cog, Emerge and the boot splash ran
+    on the plane with that property set, the cursor plane without it. Now the
+    property stays 0 and fbcon rotates by 270° in software. Cog uses `rotation=3` with
+    the matrix `0 1 0 -1 0 1`; Emerge uses `rotation: 270`
+    (or `Emerge.UI.rotate(90)`). The default boot and shutdown pictures are
+    turned by 180°; turn an app's own `/etc/splash.png` the same way.
+  * Linux 6.18.50 names the touch device `10-005d Goodix Capacitive TouchScreen`
+    (`raspberrypi/linux` `8307cc8d4cf8`). udev rules with
+    `ATTRS{name}=="Goodix Capacitive TouchScreen"` no longer match; use
+    `DRIVERS=="Goodix-TS"`.
   * fwup: boot partition files are written as deltas against the other slot on
     upgrade (`require-fwup-version` 1.12.0).
-  * fwup: an app replaces `config.txt`, `cmdline-a.txt` or `cmdline-b.txt` by
-    setting `CHROMASURF_CONFIG_TXT`, `CHROMASURF_CMDLINE_A` or
-    `CHROMASURF_CMDLINE_B` to a file path in the environment of `mix firmware`;
-    it no longer needs its own copy of `fwup.conf`.
+  * fwup: `CHROMASURF_CONFIG_TXT`, `CHROMASURF_CMDLINE_A` and
+    `CHROMASURF_CMDLINE_B` in the environment of `mix firmware` replace
+    `config.txt`, `cmdline-a.txt` and `cmdline-b.txt`; a copy of `fwup.conf`
+    is no longer needed.
   * `fwup.conf` is rendered from `fwup.conf.eex` before every `mix compile`;
     the checksum covers only the template.
-  * Kernel: `CONFIG_SQUASHFS_ZSTD=y` and `CONFIG_EROFS_FS=y`. Apps can switch to
-    `-comp zstd` (Nerves 1, `mksquashfs_flags`) or `rootfs_type: :erofs`
+  * Kernel: `CONFIG_SQUASHFS_ZSTD=y` and `CONFIG_EROFS_FS=y`. Selected in the app's config
+    with `-comp zstd` (Nerves 1, `mksquashfs_flags`) or `rootfs_type: :erofs`
     (Nerves 2).
   * `config/config.exs` starts `nerves_bootstrap` and `cli/0` sets
     `default_target: :target`, replacing the `loadconfig` alias (as in

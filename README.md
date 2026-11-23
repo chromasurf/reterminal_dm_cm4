@@ -30,7 +30,7 @@ The system ships Erlang/OTP 29 — your application needs Elixir ≥ 1.20. When 
 
 | Peripheral | Chip | Bus | Address | sysfs / Device |
 |---|---|---|---|---|
-| DSI display | GJX101c7 | MIPI DSI | — | 800x1280, rotate=270 |
+| DSI display | GJX101c7 | MIPI DSI | — | 800x1280, panel orientation right-up |
 | Touchscreen | Goodix GT9271 | I2C | 0x5D | `/dev/input/event*` |
 | Audio codec | TLV320AIC3104 | I2C1 | 0x18 | ALSA card `seeed2micvoicec` |
 | Light sensor | LTR-303ALS | I2C1 | 0x29 | `/sys/bus/iio/devices/iio:device0/` |
@@ -40,7 +40,6 @@ The system ships Erlang/OTP 29 — your application needs Elixir ≥ 1.20. When 
 | Crypto | ATECC608A | I2C3 | 0x60 | via NervesKey library |
 | GPIO expander | PCA9535 | I2C1 | 0x21 | User LED, buzzer, display power |
 | EEPROM | AT24C32 + AT24C256 | I2C3 | 0x50, 0x57 | `/sys/bus/i2c/devices/` |
-| TPM 2.0 | SLB9670 | SPI | — | `/dev/tpm0` |
 
 ## Sensors
 
@@ -83,35 +82,188 @@ File.write("/sys/class/leds/usr-buzzer/brightness", "0")
 
 ## Boot
 
-`/usr/sbin/early_modules` runs as erlinit `pre_run_exec` and loads kernel
-modules before the Erlang VM starts. Without it nerves_uevent coldplugs them
-~1.4 s after the VM launches, one at a time, and vc4 binds only once its last
-component is there. Measured on a reTerminal DM:
+erlinit runs `/usr/sbin/boot_splash` as `pre_run_exec` and `/usr/sbin/shutdown_splash` as `run_on_exit`.
+`boot_splash` starts `/usr/sbin/early_modules`, polls `/dev/fb0` every 20 ms, unbinds fbcon and
+shows a picture; it returns at once and the work runs in the background. Without `/etc/splash.png` it
+shows `/usr/share/chromasurf/splash.png`: the chromasurf wordmark in white on black, a red, green and blue
+circle before it. `shutdown_splash` shows `/usr/share/chromasurf/shutdown.png`, the same in dark grey,
+after the Erlang VM exits.
 
-| | nerves_uevent only | early_modules |
+To change the pictures, put these files in the app's `rootfs_overlay`:
+
+| File | Effect |
+|---|---|
+| `etc/splash.png` | boot picture, 800 × 1280 (the panel's native portrait: landscape art turned a quarter counter-clockwise), 8-bit RGB |
+| `etc/shutdown.png` | shutdown picture |
+| `etc/splash.d/boot` (executable) | runs after the boot picture, e.g. an animation |
+| `etc/splash.d/shutdown` (executable) | runs instead of the shutdown picture |
+
+With a custom `pre_run_exec`, call `/usr/sbin/boot_splash` from it; otherwise nerves_uevent
+loads the display modules about 1.7 s after the VM starts. Measured with the radio app: `/dev/fb0` 1.16 s after kernel start.
+
+`early_modules` loads `vc4`, `snd-soc-hdmi-codec`, `pwm-bcm2835` and `i2c-mux-pinctrl` first, then every
+device modalias except v3d: each driver that binds makes the kernel retry the deferred vc4. vc4's HDMI bind
+registers a sound card and returns -EPROBE_DEFER until the hdmi-codec driver is loaded; the DSI panel binds
+after it. v3d follows once `/sys/class/drm/card0` exists. vc4 and v3d otherwise register in either order, so
+the panel was `card0` on some boots and `card1` on others; with the script it is `/dev/dri/card0`.
+
+busybox here has no sub-second `sleep`; the scripts poll with `read -t 0.02` on an empty FIFO made by
+`mknod`.
+
+## Boot Files
+
+The system's `fwup.conf` writes `config.txt`, `app.txt` and the two kernel command lines. `config.txt` ends
+with `include app.txt`, and the system's `app.txt` holds only a comment. To add or override
+`config.txt` lines, set `CHROMASURF_CONFIG_APP` to your own `app.txt`, as in the example below.
+
+In the Nerves systems (`nerves_system_rpi4` and others) you copy the system's `fwup.conf` and point
+`config :nerves, :firmware, fwup_conf:` at the copy. Here the system's `fwup.conf` stays in use and you set
+the variables below; `app.txt` exists only in these systems.
+
+```elixir
+# config/target.exs of the app; __DIR__ is the app's config/ directory
+System.put_env("CHROMASURF_CONFIG_APP", Path.expand("app.txt", __DIR__))
+```
+
+```
+# config/app.txt
+dtparam=ant1=on
+```
+
+The firmware reads `gpu_mem` before it follows `include`; for another `gpu_mem`, replace the
+whole `config.txt`. The other variables replace a file:
+
+```elixir
+# config/target.exs of the app: config/config.txt, config/cmdline-a.txt, config/cmdline-b.txt
+System.put_env("CHROMASURF_CONFIG_TXT", Path.expand("config.txt", __DIR__))
+System.put_env("CHROMASURF_CMDLINE_A", Path.expand("cmdline-a.txt", __DIR__))
+System.put_env("CHROMASURF_CMDLINE_B", Path.expand("cmdline-b.txt", __DIR__))
+```
+
+| Variable | Replaces | Written to |
 |---|---|---|
-| vc4 (panel) | 5.03 s | 2.97 s |
-| v3d (GPU) | ~5.1 s | 3.04 s |
-| `/dev/fb0` | 5.31 s | 3.38 s |
+| `CHROMASURF_CONFIG_APP` | `app.txt` | both boot partitions |
+| `CHROMASURF_CONFIG_TXT` | `config.txt` | both boot partitions |
+| `CHROMASURF_CMDLINE_A` | `cmdline-a.txt` | `cmdline.txt` of slot A |
+| `CHROMASURF_CMDLINE_B` | `cmdline-b.txt` | `cmdline.txt` of slot B |
 
-The script loads `vc4`, `pwm-bcm2835` and `i2c-mux-pinctrl` first, then every
-device modalias except v3d: each driver that binds makes the kernel retry the
-deferred vc4. v3d follows once `/sys/class/drm/card0` exists. vc4 and v3d
-otherwise register in either order, so the panel was `card0` on some boots and
-`card1` on others; with the script it is `/dev/dri/card0`.
+Start from the system's files in `~/.nerves/artifacts/reterminal_dm_cm4-portable-<version>/images/` and keep their
+`root=` partitions. Building the firmware needs fwup 1.12 or later.
 
-busybox here has no sub-second `sleep`; the script waits with `read -t 0.02`
-on an empty FIFO made by `mknod`.
+## Nerves 2 and EROFS
 
-An app that sets its own `pre_run_exec` (a splash script, for example) replaces
-this one and calls `/usr/sbin/early_modules` from it; the script returns at once.
-Without it nerves_uevent still loads every module, in the old order.
+The system builds under Nerves 1.15 and Nerves 2. It ships `images/rootfs.tar`, the kernel has
+`CONFIG_EROFS_FS` and `CONFIG_SQUASHFS_ZSTD`, and the command line names no root filesystem type.
+
+To move an app to Nerves 2:
+
+```elixir
+# mix.exs: {:nerves, "~> 2.0.0-pre.10", runtime: false}, no {:shoehorn, ...}
+steps: [&Nerves.init_release/1, :assemble]
+
+# config/target.exs, instead of `config :shoehorn, init: ..., last: ...`
+config :nerves, application_sort: [init: [:nerves_runtime], last: [:nerves_pack]]
+
+# config/config.exs: EROFS root filesystem (needs mkfs.erofs, `brew install erofs-utils`)
+config :nerves, :firmware, rootfs_type: :erofs
+```
+
+On a reTerminal DM the radio app drew its first frame 3.3 s after kernel start with EROFS (lz4hc),
+4.2 s with SquashFS zstd and 4.7 s with SquashFS gzip. For SquashFS zstd under Nerves 1, set
+`config :nerves, :firmware, mksquashfs_flags: ["-no-xattrs", "-quiet", "-comp", "zstd", "-b", "16K"]`.
+
+Nerves 2 expects the system archive in `~/.nerves/dl/<app>-<version>/`; a local system build puts it
+in `~/.nerves/dl/`. Until a system version is released, build the app with
+`NERVES_SYSTEM=~/.nerves/artifacts/reterminal_dm_cm4-portable-<version>`.
+
+## Reboot on Kernel Errors
+
+The command line carries `oops=panic` and `sysctl.kernel.panic_on_rcu_stall=1`: an oops or an RCU stall
+panics the kernel, and the watchdog restarts the device. To switch the reboot off at runtime:
+
+```elixir
+File.write!("/proc/sys/kernel/panic_on_oops", "0")
+File.write!("/proc/sys/kernel/panic_on_rcu_stall", "0")
+```
+
+or at build time with `CHROMASURF_CMDLINE_A` / `CHROMASURF_CMDLINE_B` pointing at command lines without
+both parameters.
+
+## Crash Logging (pstore)
+
+`config.txt` loads `ramoops-pi4` with 128 KiB: the kernel console (32 KiB), panic dumps (16 KiB records)
+and pmsg (32 KiB) survive a watchdog reset or a warm reboot in `/sys/fs/pstore`.
+
+## GPU Memory
+
+`config.txt` sets `gpu_mem=76`, the Raspberry Pi OS default on the Pi 4. vc4 (KMS) and v3d, which WebKit and
+emerge render with, allocate from the 512 MB CMA area of `vc4-kms-v3d,cma-512`, not from `gpu_mem`.
+`gpu_mem` is the VideoCore firmware's share: H.264 decode and encode through `bcm2835-codec`
+(`/dev/video10`, `/dev/video11`), the camera ISP (`bcm2835-isp`, libcamera) and MMAL. 76 MB ran CarPlay's
+H.264 stream on a reTerminal DM.
+
+Raise it when the firmware reports out of memory (`vcsm`/`mmal` errors in `dmesg`, a codec or camera that
+fails to open), for example with several decode streams or the legacy camera stack at full sensor
+resolution. Below 32 MB the firmware loads the cut-down `start4cd.elf` without codecs. The firmware reads
+`gpu_mem` before it follows `include app.txt`, so to change it, replace `config.txt`
+(`CHROMASURF_CONFIG_TXT`, see [Boot Files](#boot-files)). Every MB above 76 is taken from Linux.
 
 ## Display
 
 ### DSI Configuration
 
-The 10.1" 800x1280 DSI display is configured with 270 degree rotation. Kernel cmdline includes `video=DSI-1:800x1280@60,rotate=270`. HDMI output is disabled by default.
+The 10.1" 800x1280 DSI display is portrait; its panel orientation is right-up. Kernel cmdline includes `video=DSI-1:800x1280@60`. HDMI output is disabled by default: `vc4.force_hotplug=1` reports
+HDMI-A-1 as connected even without a monitor, and Cog selects the first connected connector, so
+`video=HDMI-A-1:d` in the kernel command line switches it off.
+`File.write("/sys/class/drm/card0-HDMI-A-1/status", "detect")` switches it back on.
+
+### Rotation and Touch
+
+The panel scans out 800 × 1280 in portrait. vc4 rotates planes by 0° and 180° only, so the program
+that draws turns the picture to landscape in its own GPU pass. The connector's panel orientation is
+right-up; fbcon and Weston read it, Cog and Emerge do not. With it alone fbcon rotates by 270° in
+software, and the primary plane's rotation property stays 0. A `rotate=` in `video=…` adds to the
+orientation; at a sum of 180° fbdev sets the plane's rotation property, and it stays set for the next DRM
+master.
+
+The GT9271 reports touch in panel pixels (800 × 1280, `touchscreen-swapped-x-y` and
+`touchscreen-inverted-y` in the `reTerminal-DM` overlay), the same coordinates as the framebuffer.
+
+| Program | Picture | Touch |
+|---|---|---|
+| Cog | `COG_PLATFORM_PARAMS=renderer=gles,rotation=3` in `/etc/erlinit.config` | Matrix in `/etc/udev/rules.d/99-touchscreen.rules` |
+| Emerge | `rotation: 270` in `Emerge.Config.DRM` (chromasurf/emerge), or `Emerge.UI.rotate(90)` on a 1280 × 800 element | Panel pixels, nothing to set |
+
+`cog <url>` starts in landscape without `--platform` and `--platform-params`; Cog reads
+`COG_PLATFORM_NAME` and `COG_PLATFORM_PARAMS` when they are missing. Cog does not rotate touch, so
+libinput gets a calibration matrix from the udev database. `boot_splash` starts `udevd`, which writes the
+database.
+
+For another Cog rotation, pass `--platform-params=renderer=gles,rotation=<n>` and write a rule to
+`/run/udev/rules.d` whose file name sorts after `99-touchscreen.rules`. udev skips a file in `/run` with
+the same name as one in `/etc`; of two rules, the later one sets the matrix.
+
+| `rotation` | `LIBINPUT_CALIBRATION_MATRIX` |
+|---|---|
+| 0 | `1 0 0 0 1 0` |
+| 1 | `0 -1 1 1 0 0` |
+| 2 | `-1 0 1 0 -1 1` |
+| 3 | `0 1 0 -1 0 1` |
+
+```elixir
+File.mkdir_p!("/run/udev/rules.d")
+
+File.write!("/run/udev/rules.d/99-zz-touch-rotation.rules", """
+SUBSYSTEM=="input", KERNEL=="event*", DRIVERS=="Goodix-TS", ENV{LIBINPUT_CALIBRATION_MATRIX}="0 1 0 -1 0 1"
+""")
+
+System.cmd("udevadm", ["control", "--reload"])
+System.cmd("udevadm", ["trigger", "--subsystem-match=input", "--action=change"])
+System.cmd("udevadm", ["settle", "--timeout=5"])
+```
+
+Linux 6.18.50 names the touch device `10-005d Goodix Capacitive TouchScreen`. Match it with
+`DRIVERS=="Goodix-TS"`, not with `ATTRS{name}`.
 
 ### Display Initialization
 
@@ -152,9 +304,19 @@ File.write("/sys/class/backlight/lcd_backlight/brightness", "128")
 File.read!("/sys/class/backlight/lcd_backlight/brightness")
 ```
 
+### Kiosk Mode (Cog on DRM)
+
+Cog draws directly on the panel; `examples/kiosk_drm.ex` is a supervisor setup. `/etc/erlinit.config` sets
+`COG_PLATFORM_NAME`, `COG_PLATFORM_PARAMS` and `XDG_RUNTIME_DIR=/run`, and HDMI is off, so Cog starts
+with only a URL:
+
+```elixir
+:os.cmd(~c"cog http://localhost:4000")
+```
+
 ### Kiosk Mode (Weston + Cog)
 
-The system includes Weston compositor and Cog WebKit browser for kiosk applications. See `examples/kiosk.ex` for a full supervisor setup. Quick start:
+The system includes Weston compositor and Cog WebKit browser for kiosk applications. See `examples/kiosk.ex` for a full supervisor setup. Weston turns touch with its output transform (`weston.ini`), so before starting it set the identity matrix `1 0 0 0 1 0` with a rule as in "Rotation and Touch". Touch under Weston is not tested with the touch coordinates of v1.3.0. Quick start:
 
 ```elixir
 # Start Weston
@@ -222,10 +384,6 @@ info = NervesKey.default_info(i2c)
 serial = info.manufacturer_sn
 ```
 
-### TPM 2.0
-
-Infineon SLB9670. Available at `/dev/tpm0`. The system includes `tpm2-pkcs11` for PKCS#11 integration.
-
 ## RTC
 
 NXP PCF8563W at I2C3 address 0x51 with hardware watchdog (120s timeout):
@@ -248,13 +406,9 @@ Supports official Raspberry Pi camera modules via [`libcamera`](https://libcamer
 cmd("libcamera-jpeg -n -v -o /data/test.jpeg")
 ```
 
-## Crash Logging (Ramoops)
-
-The DM includes the `ramoops` overlay for preserving crash information across reboots in DRAM via the `pstore` driver.
-
 ## Supported WiFi Devices
 
-The onboard Raspberry Pi CM4 WiFi module (`brcmfmac` driver) is included but **disabled by default** via `dtoverlay=disable-wifi` and `dtoverlay=disable-bt` in `config.txt`. Remove these overlays to re-enable.
+The onboard Raspberry Pi CM4 WiFi module (`brcmfmac` driver) is included and enabled.
 
 ## Provisioning
 
@@ -282,7 +436,7 @@ WebKit compilation is slow and memory-hungry. If the build gets OOM-killed, simp
 
 ## Linux Kernel
 
-Kernel: Linux 6.18 (Raspberry Pi fork, tag `stable_20260527`)
+Kernel: Linux 6.18.50 (Raspberry Pi fork, tag `stable_20260911`)
 Config: `linux-6.18.defconfig` (stripped-down for Nerves)
 
 ---

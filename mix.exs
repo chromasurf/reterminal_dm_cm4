@@ -12,7 +12,6 @@ defmodule ReterminalDmCm4.MixProject do
     [
       app: @app,
       version: @version,
-      # Because we're using OTP 28, we need to enforce Elixir 1.17 or later.
       elixir: "~> 1.17",
       compilers: Mix.compilers() ++ [:nerves_package],
       nerves_package: nerves_package(),
@@ -44,9 +43,8 @@ defmodule ReterminalDmCm4.MixProject do
       artifact_sites: [
         {:github_releases, "#{@github_organization}/#{@app}"}
       ],
-      # WebKit compilation is memory-hungry: give the build VM all host RAM
-      # and cap parallelism so ~9 concurrent WebCore TUs (2-4 GB each) fit —
-      # -j13 on 32G hosts gets the compiler OOM-killed.
+      # 8 jobs keep ~9 concurrent WebCore TUs (2-4 GB each) within the VM's RAM.
+      # At -j13 on a 32 GB host the compiler was OOM-killed.
       build_runner_config: [cpus: 8, memory: :host],
       build_runner_opts: build_runner_opts(),
       platform: Nerves.System.BR,
@@ -108,8 +106,10 @@ defmodule ReterminalDmCm4.MixProject do
   # fwup.conf is rendered from fwup.conf.eex, so the checksum covers only the template.
   defp source_finger_print_files do
     [
+      "app.txt",
       "config/config.exs",
       "fwup_include",
+      "package",
       "rootfs_overlay",
       "CHANGELOG.md",
       "cmdline-a.txt",

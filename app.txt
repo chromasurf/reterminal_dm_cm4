@@ -1,0 +1,2 @@
+# config.txt includes this file last, so its lines override the system's. To replace it, set
+# CHROMASURF_CONFIG_APP for `mix firmware`. gpu_mem has no effect here; the firmware reads it before the include.
