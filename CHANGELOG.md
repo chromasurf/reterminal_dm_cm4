@@ -12,6 +12,23 @@ follows:
    releases, and Linux kernel updates. They're also made to fix bugs and add
    features to the build infrastructure.
 
+## v1.3.1
+
+Touch config for the GT9271, reTerminal DM only.
+
+* Changes
+  * `goodix_9271_cfg.bin` is linked into the kernel (`CONFIG_EXTRA_FIRMWARE`).
+    The Goodix driver is built in and probes 0.75 s after boot, before the
+    rootfs is mounted, so it never loaded the file from `/lib/firmware`. The
+    GT9271 stores the last config written to it in flash; devices ran a config
+    written by hand or the factory config. The driver now writes the shipped
+    config at every boot. A rollback through `/data/firmware` and a driver
+    rebind lasts until the next boot.
+  * `goodix_9271_cfg.bin`: Normal_Filter 8 → 2 (register 0x8050). With 8 the
+    controller averages coordinates over several reports, and a dragged page
+    lags behind the finger. Touch-down to the first coordinate change is 31 ms
+    (median) with both values, measured on a reTerminal DM.
+
 ## v1.3.0
 
 Moves to Buildroot 2026.08.1, Erlang/OTP 29.1.2 and Linux 6.18.50, brings the

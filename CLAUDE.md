@@ -47,7 +47,7 @@ mix generate_fwup_conf    # renders fwup.conf from fwup.conf.eex; mix compile ru
 | `package/rethings/reTerminal-DM-overlay.dts` | Touch in panel pixels: `touchscreen-swapped-x-y`, `touchscreen-inverted-y`; panel `rotation = <90>` (orientation right-up) |
 | `rootfs_overlay/usr/sbin/` | `boot_splash`, `early_modules`, `shutdown_splash` |
 | `rootfs_overlay/usr/share/chromasurf/` | Default boot and shutdown pictures, 800 × 1280 |
-| `rootfs_overlay/lib/firmware/goodix_9271_cfg.bin` | Retuned GT9271 touch config, ~96 Hz reports |
+| `rootfs_overlay/lib/firmware/goodix_9271_cfg.bin` | Retuned GT9271 touch config, ~96 Hz reports, Normal_Filter 2; `external.mk` copies it into the kernel source, `CONFIG_EXTRA_FIRMWARE` links it into the kernel |
 | `examples/` | App code for reference, not part of the system |
 
 `gpu_mem` takes effect only in `config.txt`; the firmware reads it before `include app.txt`.
