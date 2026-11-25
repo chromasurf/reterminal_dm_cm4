@@ -1,0 +1,127 @@
+From: chromasurf
+Subject: [PATCH] WPE: scrolling past the edges for an embedder rubber band
+
+A smooth 2D axis event with axis 0x4f565253 ("OVRS") is a touch drag of an
+embedder that runs its own rubber band. WebEventFactory passes it on as precise
+deltas without wheel ticks; such deltas:
+
+- scroll without clamping in ScrollingEffectsController, so a scroll container
+  moves past its edge on the scrolling thread while fixed and sticky elements
+  stay in place;
+- stay on the container under the pointer at an edge, on the scrolling thread
+  (ScrollingTreeScrollingNode::shouldRubberBand) and on the main thread
+  (EventHandler::scrollableAreaCanHandleEvent).
+
+Without HAVE(RUBBER_BANDING), a scrolling node whose position is out of bounds
+counts as rubber banding, and RenderLayerScrollableArea::isRubberBandInProgress
+asks the scrolling coordinator, so layout does not clamp the position back.
+The embedder sends the deltas that bring the container back to its edge.
+
+diff --git a/Source/WebCore/page/EventHandler.cpp b/Source/WebCore/page/EventHandler.cpp
+--- a/Source/WebCore/page/EventHandler.cpp
++++ b/Source/WebCore/page/EventHandler.cpp
+@@ -3495,6 +3495,13 @@
+ 
+ bool EventHandler::scrollableAreaCanHandleEvent(const PlatformWheelEvent& wheelEvent, ScrollableArea& scrollableArea)
+ {
++#if !HAVE(RUBBER_BANDING)
++    // An embedder rubber band (precise deltas without wheel ticks) stays on the innermost scrollable
++    // area instead of propagating at an edge.
++    if (wheelEvent.hasPreciseScrollingDeltas() && !wheelEvent.wheelTicksX() && !wheelEvent.wheelTicksY() && scrollableArea.overscrollBehaviorAllowsRubberBand())
++        return true;
++#endif
++
+ #if PLATFORM(MAC)
+     auto biasedDelta = ScrollingEffectsController::wheelDeltaBiasingTowardsVertical(wheelEvent.delta());
+ #else
+diff --git a/Source/WebCore/page/scrolling/ScrollingTreeScrollingNode.cpp b/Source/WebCore/page/scrolling/ScrollingTreeScrollingNode.cpp
+--- a/Source/WebCore/page/scrolling/ScrollingTreeScrollingNode.cpp
++++ b/Source/WebCore/page/scrolling/ScrollingTreeScrollingNode.cpp
+@@ -189,6 +189,13 @@
+ 
+ bool ScrollingTreeScrollingNode::shouldRubberBand(const PlatformWheelEvent& wheelEvent, EventTargeting eventTargeting) const
+ {
++#if !HAVE(RUBBER_BANDING)
++    // An embedder rubber band (precise deltas without wheel ticks) stays on the node under the pointer
++    // instead of propagating to the parent at an edge.
++    if (wheelEvent.hasPreciseScrollingDeltas() && !wheelEvent.wheelTicksX() && !wheelEvent.wheelTicksY())
++        return (wheelEvent.deltaY() && allowsVerticalScrolling()) || (wheelEvent.deltaX() && allowsHorizontalScrolling());
++#endif
++
+     if (isLatchedNode())
+         return true;
+ 
+@@ -441,7 +448,13 @@
+         willDoProgrammaticScroll(position);
+ 
+     m_currentScrollPosition = adjustedScrollPosition(position, clamp);
+-    
++
++#if !HAVE(RUBBER_BANDING)
++    // An embedder rubber band scrolls past the edges without clamping; while the position is out of
++    // bounds the node counts as rubber banding, so layout on the main thread does not clamp it.
++    scrollingTree()->setRubberBandingInProgressForNode(scrollingNodeID(), m_currentScrollPosition != clampScrollPosition(m_currentScrollPosition));
++#endif
++
+     LOG_WITH_STREAM(Scrolling, stream << "ScrollingTreeScrollingNode " << scrollingNodeID() << " scrollTo " << position << " adjusted to "
+         << m_currentScrollPosition << " (" << scrollType << ", " << clamp << ") (delta from last committed position " << (m_lastCommittedScrollPosition - m_currentScrollPosition) << ")"
+         << " rubberbanding " << scrollingTree()->isRubberBandInProgressForNode(scrollingNodeID()));
+diff --git a/Source/WebCore/platform/ScrollingEffectsController.cpp b/Source/WebCore/platform/ScrollingEffectsController.cpp
+--- a/Source/WebCore/platform/ScrollingEffectsController.cpp
++++ b/Source/WebCore/platform/ScrollingEffectsController.cpp
+@@ -388,6 +388,15 @@
+     auto scrollOffset = m_client.scrollOffset();
+     float deltaX = m_client.allowsHorizontalScrolling() ? wheelEvent.deltaX() : 0;
+     float deltaY = m_client.allowsVerticalScrolling() ? wheelEvent.deltaY() : 0;
++
++    // Precise deltas without wheel ticks come from an embedder that runs its own rubber band: they may
++    // move past the edges, and the embedder brings the position back.
++    if (wheelEvent.hasPreciseScrollingDeltas() && !wheelEvent.wheelTicksX() && !wheelEvent.wheelTicksY()) {
++        if (!deltaX && !deltaY)
++            return false;
++        m_client.immediateScrollBy({ -deltaX, -deltaY }, ScrollClamping::Unclamped);
++        return true;
++    }
+     auto extents = m_client.scrollExtents();
+     auto minPosition = extents.minimumScrollOffset();
+     auto maxPosition = extents.maximumScrollOffset();
+diff --git a/Source/WebCore/rendering/RenderLayerScrollableArea.cpp b/Source/WebCore/rendering/RenderLayerScrollableArea.cpp
+--- a/Source/WebCore/rendering/RenderLayerScrollableArea.cpp
++++ b/Source/WebCore/rendering/RenderLayerScrollableArea.cpp
+@@ -214,6 +214,13 @@
+ 
+     if (auto scrollAnimator = existingScrollAnimator())
+         return scrollAnimator->isRubberBandInProgress();
++#else
++    // An embedder rubber band, marked by the scrolling tree.
++    if (!scrollsOverflow())
++        return false;
++
++    if (RefPtr scrollingCoordinator = m_layer.protectedPage()->scrollingCoordinator())
++        return scrollingCoordinator->isRubberBandInProgress(scrollingNodeID());
+ #endif
+ 
+     return false;
+diff --git a/Source/WebKit/Shared/libwpe/WebEventFactory.cpp b/Source/WebKit/Shared/libwpe/WebEventFactory.cpp
+--- a/Source/WebKit/Shared/libwpe/WebEventFactory.cpp
++++ b/Source/WebKit/Shared/libwpe/WebEventFactory.cpp
+@@ -207,6 +207,10 @@
+         0, 0, 0, clickCount(event), 0, syntheticClickType);
+ }
+ 
++// A smooth 2D axis event with this axis value is a touch drag that may scroll past the edges (a
++// rubber band driven by the embedder). It reaches WebCore as precise deltas without wheel ticks.
++static constexpr uint32_t overscrollAxis = 0x4f565253;
++
+ WebWheelEvent WebEventFactory::createWebWheelEvent(struct wpe_input_axis_event* event, float deviceScaleFactor, WebWheelEvent::Phase phase, WebWheelEvent::Phase momentumPhase)
+ {
+     WebCore::IntPoint position(event->x, event->y);
+@@ -229,6 +233,8 @@
+             wheelTicks = WebCore::FloatSize(event2D->x_axis / deviceScaleFactor, event2D->y_axis / deviceScaleFactor);
+             delta = wheelTicks;
+             hasPreciseScrollingDeltas = true;
++            if (event->axis == overscrollAxis)
++                wheelTicks = { };
+             break;
+         default:
+             ASSERT_NOT_REACHED();

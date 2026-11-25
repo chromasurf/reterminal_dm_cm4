@@ -12,6 +12,19 @@ follows:
    releases, and Linux kernel updates. They're also made to fix bugs and add
    features to the build infrastructure.
 
+## v1.3.2
+
+WPE WebKit patch for a rubber band of the embedder.
+
+* Changes
+  * `patches/wpewebkit/0001-wpe-scrolling-past-the-edges-for-an-embedder-rubber-band.patch`:
+    a smooth 2D axis event with axis 0x4f565253 may scroll a container past its
+    edges, and WebKit keeps it there until the embedder scrolls it back. Fixed and
+    sticky elements stay in place. emerge_webview uses it for
+    `rubberbanding: :webkit`. Other input is unchanged.
+  * v4l2loopback kernel module: `modprobe v4l2loopback` creates a video device an
+    application writes frames to.
+
 ## v1.3.1
 
 Touch config for the GT9271, reTerminal DM only.
